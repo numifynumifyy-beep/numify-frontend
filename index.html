@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Numify — Login</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="center-page">
+  <div class="auth-card">
+    <div class="logo-mark">N</div>
+    <h1>Numify</h1>
+    <p class="subtitle">TikTok Live phone number extractor</p>
+    <button id="googleBtn" class="btn-google">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" />
+      Continue with Google
+    </button>
+    <p id="msg" class="msg"></p>
+  </div>
+
+  <script type="module">
+    import { auth } from "./firebase-config.js";
+    import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+    import { doc, getDoc, setDoc, serverTimestamp }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { db } from "./firebase-config.js";
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      document.getElementById("msg").textContent = "Checking account...";
+      const ref = doc(db, "users", user.uid);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, {
+          email: user.email,
+          name: user.displayName,
+          status: "pending",
+          createdAt: serverTimestamp()
+        });
+      }
+      const status = snap.exists() ? snap.data().status : "pending";
+      location.href = status === "active" ? "dashboard.html" : "subscribe.html";
+    });
+
+    document.getElementById("googleBtn").onclick = async () => {
+      const provider = new GoogleAuthProvider();
+      try {
+        await signInWithPopup(auth, provider);
+      } catch(e) {
+        document.getElementById("msg").textContent = e.message;
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Numify — Dashboard</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-logo">N <span>Numify</span></div>
+    <div class="nav-right">
+      <span id="navEmail" class="nav-email"></span>
+      <button onclick="logout()" class="btn-nav-logout">Sign out</button>
+    </div>
+  </nav>
+
+  <div class="dashboard-wrap">
+    <div class="url-row">
+      <input id="urlInput" type="text" placeholder="https://www.tiktok.com/@username/live"/>
+      <button id="startBtn" class="btn-start" onclick="startScrape()">Start</button>
+      <button id="stopBtn" class="btn-stop" onclick="stopScrape()" style="display:none">Stop</button>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Numbers found</div>
+        <div class="stat-val red" id="statCount">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Comments scanned</div>
+        <div class="stat-val" id="statComments">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Runtime</div>
+        <div class="stat-val" id="statTime">0:00</div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div class="dot" id="dot"></div>
+      <span id="statusText">Ready — enter a TikTok Live URL above</span>
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-head">
+        <div>Time</div>
+        <div>Number</div>
+        <div>Comment</div>
+      </div>
+      <div class="feed" id="feed">
+        <div class="empty">Numbers will appear here as they are found</div>
+      </div>
+    </div>
+
+    <div class="export-row">
+      <button class="btn-export" onclick="exportCSV()">Export CSV</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { auth } from "./firebase-config.js";
+    import { onAuthStateChanged, signOut }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    const BACKEND_WS = "wss://numify-backend-a139.onrender.com";
+    let ws, rows = [], commentCount = 0, startTime, timerInterval, running = false;
+
+    onAuthStateChanged(auth, (user) => {
+      if (!user) { location.href = "index.html"; return; }
+      document.getElementById("navEmail").textContent = user.email;
+    });
+
+    window.startScrape = async () => {
+      const url = document.getElementById("urlInput").value.trim();
+      if (!url) { setStatus("Please enter a URL", "error"); return; }
+      const user = auth.currentUser;
+      const token = await user.getIdToken();
+      rows = []; commentCount = 0;
+      document.getElementById("statCount").textContent = "0";
+      document.getElementById("statComments").textContent = "0";
+      document.getElementById("feed").innerHTML = '<div class="empty">Connecting...</div>';
+      document.getElementById("startBtn").disabled = true;
+      document.getElementById("stopBtn").style.display = "";
+      startTime = Date.now();
+      running = true;
+      timerInterval = setInterval(updateTimer, 1000);
+      ws = new WebSocket(`${BACKEND_WS}/ws/scrape`);
+      ws.onopen = () => ws.send(JSON.stringify({ token, url }));
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "status") setStatus(msg.message, "live");
+        else if (msg.type === "number") addRow(msg);
+        else if (msg.type === "error") { setStatus("Error: " + msg.message, "error"); stopScrape(); }
+      };
+      ws.onclose = () => { if (running) { setStatus("Disconnected", ""); stopScrape(); } };
+    };
+
+    window.stopScrape = () => {
+      running = false;
+      if (ws) { ws.close(); ws = null; }
+      clearInterval(timerInterval);
+      document.getElementById("startBtn").disabled = false;
+      document.getElementById("stopBtn").style.display = "none";
+      setStatus("Stopped. " + rows.length + " number(s) found.", "");
+    };
+
+    function addRow(msg) {
+      const feed = document.getElementById("feed");
+      const empty = feed.querySelector(".empty");
+      if (empty) empty.remove();
+      rows.push(msg);
+      commentCount++;
+      document.getElementById("statCount").textContent = rows.length;
+      document.getElementById("statComments").textContent = commentCount;
+      const row = document.createElement("div");
+      row.className = "row";
+      row.innerHTML = `
+        <div class="cell ts">${msg.timestamp.slice(11)}</div>
+        <div class="cell num">${msg.number}</div>
+        <div class="cell comment">${msg.comment}</div>
+      `;
+      feed.prepend(row);
+    }
+
+    function setStatus(msg, state) {
+      document.getElementById("statusText").textContent = msg;
+      document.getElementById("dot").className = "dot" +
+        (state === "live" ? " live" : state === "error" ? " error" : "");
+    }
+
+    function updateTimer() {
+      const s = Math.floor((Date.now() - startTime) / 1000);
+      document.getElementById("statTime").textContent =
+        Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+    }
+
+    window.exportCSV = () => {
+      if (!rows.length) return;
+      const lines = [
+        "timestamp,number,comment",
+        ...rows.map(r => `"${r.timestamp}","${r.number}","${r.comment.replace(/"/g, '""')}"`)
+      ];
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+      a.download = "numify_" + new Date().toISOString().slice(0, 10) + ".csv";
+      a.click();
+    };
+
+    window.logout = () => signOut(auth).then(() => location.href = "index.html");
+  </script>
+</body>
+</html>
